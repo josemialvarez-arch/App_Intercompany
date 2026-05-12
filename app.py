@@ -602,7 +602,7 @@ def mostrar_resultados(r):
                     try:
                         bajada = generar_bajada_trabajada(st.session_state.archivos_tmp, r)
                         buf_baj = io.BytesIO()
-                        with pd.ExcelWriter(buf_baj, engine='openpyxl') as writer:
+                        with pd.ExcelWriter(buf_baj, engine='xlsxwriter') as writer:
                             bajada.to_excel(writer, index=False, sheet_name='Bajada Trabajada')
                             entities = sorted(bajada['E.Legal Cta'].unique())
                             for ent in entities:
