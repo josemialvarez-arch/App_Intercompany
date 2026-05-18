@@ -22,15 +22,12 @@ RUTA_RUBROS  = None  # se setea desde app.py al subir el Template Maestro
 # Las variables RUTA_GLOSARIO y RUTA_PL ya no son necesarias como archivos separados.
 
 # ---- Tasas y markups intercompany (Ecuador) ----
-TASA_MARCA         = 0.025   # 2.5%  — Licencia de Marca (Ecuador)   ⚠️ Confirmar en contrato
-TASA_IT            = 0.05    # 5.0%  — Licencia de IT    (Ecuador)   ⚠️ Confirmar en contrato
+# Tasas de licencia — se cargan desde template_rubros.xlsx (hoja Entity_Config).
+# Fallback hardcodeado si el template no está disponible.
+TASA_MARCA         = 0.025   # 2.5%  — Licencia de Marca (default/fallback)
+TASA_IT            = 0.05    # 5.0%  — Licencia de IT    (default/fallback)
 
-MAPEO_PAIS_POS = {
-    'Argentina': 101, 'Mexico': 103, 'Brasil': 104, 'Usa': 105, 'Chile': 108,
-    'Ecuador': 113, 'Peru': 115, 'Colombia': 116, 'Bolivia': 601, 'Costa Rica': 601,
-    'El Salvador': 601, 'España': 601, 'Guatemala': 601, 'Honduras': 601,
-    'Nicaragua': 601, 'Panama': 601, 'Paraguay': 601, 'Puerto Rico': 601, 'Uruguay': 601
-}
+MAPEO_PAIS_POS = {}  # se carga en ejecutar_proceso_completo() desde template_rubros.xlsx (hoja POS_Config)
 
 # ---- Configuración por entidad (fuente: Lineamientos Intercompany) ----
 
@@ -124,51 +121,29 @@ PROD_MAP = {}  # se carga en ejecutar_proceso_completo() desde template_rubros.x
 DI_MAP = {}    # se carga en ejecutar_proceso_completo() desde template_rubros.xlsx
 DI_INT = set() # conjunto de códigos DomInt que son INT (derivado de DI_MAP)
 
-# Cuentas excluidas de costos directos HT/ONA en el cálculo de RFC
-# (64201/64202 se excluyen de E18/F18 pero SÍ entran en M5 corporativo)
-# ⚠️ Confirmar si se agregan/eliminan cuentas por cambio de metodología
-EXCL_COST_ACCOUNTS = {68210, 41311, 41312, 64201, 64202, 53300, 53305}
+# Cuentas excluidas de costos directos HT/ONA (E18/F18) en el cálculo de RFC.
+# Se carga dinámicamente desde template_rubros.xlsx (hoja Cuentas_Excluidas, Calculo='E18').
+# Para agregar/eliminar cuentas: editar el template, no este archivo.
+EXCL_COST_ACCOUNTS = set()  # se carga en ejecutar_proceso_completo()
+
+# Cuentas de referencia por concepto — se cargan desde template_rubros.xlsx (hoja Account_Config).
+# Para modificar: editar el template, no este archivo.
+ACCT_FRAUDES        = set()  # 53300, 53305
+ACCT_RFC_BOOKED     = set()  # 49102
+ACCT_MARCA_BOOKED   = set()  # 70104
+ACCT_IT_BOOKED      = set()  # 70105
+ACCT_HOSTING_BOOKED = set()  # 49120 (USA)
+ACCT_IT_MANT_BOOKED = set()  # 70114 (USA)
 
 # RFC_COST_RUBROS: Se construye dinámicamente desde template_rubros.xlsx
 # Toma todos los RUBRO del template excepto NET REVENUE y FINANCE,
 # y los mapea a PL_Totalizador para filtrar costos del RFC.
 RFC_COST_RUBROS = set()  # se carga en ejecutar_proceso_completo() desde el template
 
-# ── Constantes específicas USA (Mapeo PL Nivel 1 nativo del balance Oracle) ──
-# Categorías CORPORATE incluidas en la base de costo del RFC de USA.
-# Se excluyen: impuestos, comisiones CC, marketing directo, intereses, FX.
-# ✅ Validado contra Despegar USA Segmentación Nov-2025.xlsx
-CORP_RFC_PL1_USA = {
-    'Channels-Personnel/Expenses',
-    'Finance & Admin.',
-    'General Management',
-    'IT - Personnel/Expenses',
-}
 
-# Categorías de incentivos de ingresos — se excluyen de E18/F18 (son ajustes
-# de revenue, no costos operativos directos de HT/ONA)
-INCENTIVE_PL1_USA = {'Back End Incentives', 'Other Incentives', 'Up Front Incentives'}
-
-# Categorías no operativas — se excluyen de E18/F18 (intereses, diferencias de cambio)
-NON_OP_PL1_USA = {'Interest Income', 'FX/Other'}
-
-# Exclusión combinada para costos directos HT/ONA (E18/F18)
-# ✅ 'Customer Fees & Charges' excluido: no aparece en Estimado filas 18-21 (fuera de
-#    COST OF REVENUE / S&M / TECHNOLOGY / GENERAL usados por SUM(E18:E21) del Excel)
-EXCL_PL1_USA = NON_OP_PL1_USA | INCENTIVE_PL1_USA | {'Customer Fees & Charges'}
-
-# Correcciones de cuentas para M5 CORPORATE (validado vs Estimado!M6 Excel):
-# EXCL: 80101 (Gastos bancarios) — PL1='General Management' pero Excel lo ubica en sección
-#       FINANCE (filas 76-87 del Estimado, fuera del SUM M6) → excluir de M5
-# EXTRA: 80102 (Comisión de Tarjetas) y 64341 (Branding) — PL1 excluido por CORP_RFC_PL1_USA
-#        pero Excel los incluye en M6 (D32 y D49:D57 respectivamente para CORPORATE)
-# Net validado: −18,771 + 15,116 + 988 = −2,666.58 → M5 = 2,483,539.18 ✅
-CORP_M5_EXCL_ACCOUNTS  = {80101}          # Excluir a pesar de PL1='General Management'
-CORP_M5_EXTRA_ACCOUNTS = {80102, 64341}   # Incluir a pesar de PL1 no ∈ CORP_RFC_PL1_USA
-
-# Categoría PL Nivel 1 que define los Costos de Hosting en USA (IT CORPORATE)
-# ✅ Validado: 'IT - Personnel/Expenses' CORPORATE non-IC = 1,394,173.78
-HOSTING_PL1_USA = 'IT - Personnel/Expenses'
+# Categoría PL Nivel 1 que define los Costos de Hosting en USA.
+# Se carga desde template_rubros.xlsx (hoja Entity_Config, columna Hosting_PL1, entidad 105).
+HOSTING_PL1_USA = 'IT - Personnel/Expenses'  # default/fallback
 
 # ============================================================================
 # FUNCIONES DE CARGA
@@ -600,8 +575,8 @@ def calcular_llaves_adi(df_adi):
 
     return llaves_adi
 
-def calcular_llaves_revenue(df_balance, df_glosario):
-    if df_balance is None or df_glosario is None:
+def calcular_llaves_revenue(df_balance, df_glosario=None):
+    if df_balance is None:
         return {}
 
     llaves = {}
@@ -612,6 +587,13 @@ def calcular_llaves_revenue(df_balance, df_glosario):
     if df_pl is None:
         print("\n⚠️ No se pudo cargar el diccionario PL")
         return {}
+
+    # Cargar apertura ONA desde template
+    try:
+        df_apertura = pd.read_excel(RUTA_RUBROS, sheet_name='Apertura_ONA')
+        df_apertura['COD'] = pd.to_numeric(df_apertura['COD'], errors='coerce')
+    except:
+        df_apertura = pd.DataFrame(columns=['COD','CATEGORIA_APERTURA_ONA'])
 
     df_balance['Cuenta_Merge'] = pd.to_numeric(df_balance['Account_Num'], errors='coerce')
     df_balance = df_balance.merge(df_pl, left_on='Cuenta_Merge', right_on='Cuenta', how='left')
@@ -625,10 +607,9 @@ def calcular_llaves_revenue(df_balance, df_glosario):
         print("\n⚠️ No se encontraron registros de Net Revenues")
         return {}
 
-    df_net['Product_Code'] = df_net['Product_Flex'].apply(
-        lambda x: int(x) if pd.notna(x) and str(x).replace('.','').replace('-','').isdigit() else None
-    )
-    df_net = df_net.merge(df_glosario, left_on='Product_Code', right_on='COD', how='left')
+    df_net['Product_Code'] = pd.to_numeric(df_net['Product_Flex'], errors='coerce')
+    df_net = df_net.merge(df_apertura[['COD','CATEGORIA_APERTURA_ONA']],
+                          left_on='Product_Code', right_on='COD', how='left')
 
     # ── REV1: Apertura ONA ────────────────────────────────────────────────────
     entidades_rev1 = ['101', '103', '104', '105', '108', '113', '115', '116', '601']
@@ -806,15 +787,15 @@ def calcular_ecuador_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
     # Formula Segmentación: G31 = HT_INT_income + 49102_HT
     # (el 49102 es el RFC ya cobrado/pagado, que se incluye en la base de ingresos)
     G31 = -(df_net_ni[(df_net_ni['_prod'] == 'HT')  & (df_net_ni['_di'] == 'INT')][col_bal].sum()) \
-          -(df_ec[(df_ec['Account_Num'] == 49102) & (df_ec['_prod'] == 'HT') ][col_bal].sum())
+          -(df_ec[(df_ec['Account_Num'].isin(ACCT_RFC_BOOKED)) & (df_ec['_prod'] == 'HT') ][col_bal].sum())
 
     H31 = -(df_net_ni[(df_net_ni['_prod'] == 'ONA') & (df_net_ni['_di'] == 'INT')][col_bal].sum()) \
-          -(df_ec[(df_ec['Account_Num'] == 49102) & (df_ec['_prod'] == 'ONA')][col_bal].sum())
+          -(df_ec[(df_ec['Account_Num'].isin(ACCT_RFC_BOOKED)) & (df_ec['_prod'] == 'ONA')][col_bal].sum())
 
     # D31: todos los ingresos VUELOS (Net Revenue, todos DOM/INT/N/A) + fraudes totales entity 113
     # Nota: Ingresos!C20 = VUELOS_all + Grand_Total_fraudes(53300/53305 todos los productos)
     D31 = -(df_net_ni[df_net_ni['_prod'] == 'VUELOS'][col_bal].sum()) \
-          -(df_ec[df_ec['Account_Num'].isin([53300, 53305])][col_bal].sum())
+          -(df_ec[df_ec['Account_Num'].isin(ACCT_FRAUDES)][col_bal].sum())
 
     # E31: HT Net Revenue DOM + N/A
     # Formula Ingresos!C5 = GETPIVOTDATA(HT,DOM) + GETPIVOTDATA(HT,N/A)
@@ -872,13 +853,13 @@ def calcular_ecuador_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
 
     # ── LICENCIAS — catch-up YTD + accrual mensual ────────────────────────────
     # Fórmula: (Teorico_YTD × TASA - Ya_contabilizado) + Teorico_YTD × TASA / mes_base
-    D65 = df_ec[(df_ec['Account_Num'] == 70104) & (df_ec['_prod'] == 'VUELOS')][col_bal].sum()
-    E65 = df_ec[(df_ec['Account_Num'] == 70104) & (df_ec['_prod'] == 'HT')   ][col_bal].sum()
-    F65 = df_ec[(df_ec['Account_Num'] == 70104) & (df_ec['_prod'] == 'ONA')  ][col_bal].sum()
+    D65 = df_ec[(df_ec['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_ec['_prod'] == 'VUELOS')][col_bal].sum()
+    E65 = df_ec[(df_ec['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_ec['_prod'] == 'HT')   ][col_bal].sum()
+    F65 = df_ec[(df_ec['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_ec['_prod'] == 'ONA')  ][col_bal].sum()
 
-    D70 = df_ec[(df_ec['Account_Num'] == 70105) & (df_ec['_prod'] == 'VUELOS')][col_bal].sum()
-    E70 = df_ec[(df_ec['Account_Num'] == 70105) & (df_ec['_prod'] == 'HT')   ][col_bal].sum()
-    F70 = df_ec[(df_ec['Account_Num'] == 70105) & (df_ec['_prod'] == 'ONA')  ][col_bal].sum()
+    D70 = df_ec[(df_ec['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_ec['_prod'] == 'VUELOS')][col_bal].sum()
+    E70 = df_ec[(df_ec['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_ec['_prod'] == 'HT')   ][col_bal].sum()
+    F70 = df_ec[(df_ec['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_ec['_prod'] == 'ONA')  ][col_bal].sum()
 
     D61 = D31 * TASA_MARCA;  E61 = E31 * TASA_MARCA;  F61 = F31 * TASA_MARCA
     D62 = D31 * TASA_IT;     E62 = E31 * TASA_IT;     F62 = F31 * TASA_IT
@@ -997,7 +978,7 @@ def calcular_chile_hoja_llave(df_balance_raw, llaves_ordenes, tc_clp, mes_base=1
     # Los fraudes aparecen en B51 pivot de Ingresos y se suman al ingreso base
     # de la Segmentación (Ingresos!C18/D18/etc.) para ajustar la base de Licencias y RFC.
     def _fraudes(prod_list, di_list=None):
-        mask = df_cl['Account_Num'].isin([53300, 53305]) & df_cl['_prod'].isin(prod_list)
+        mask = df_cl['Account_Num'].isin(ACCT_FRAUDES) & df_cl['_prod'].isin(prod_list)
         if di_list is not None:
             mask &= df_cl['_di'].isin(di_list)
         return df_cl[mask][col_bal].sum()
@@ -1013,11 +994,11 @@ def calcular_chile_hoja_llave(df_balance_raw, llaves_ordenes, tc_clp, mes_base=1
     # Fórmula Excel: F31_Seg = -Ingresos!D18 - D9  (HT INT con fraudes + 49102)
     #                G31_Seg = -Ingresos!D19 - E9  (ONA INT con fraudes + 49102)
     G31 = -(df_net_ni[(df_net_ni['_prod'] == 'HT')  & (df_net_ni['_di'] == 'INT')][col_bal].sum()) \
-          -(df_cl[(df_cl['Account_Num'] == 49102) & (df_cl['_prod'] == 'HT') ][col_bal].sum()) \
+          -(df_cl[(df_cl['Account_Num'].isin(ACCT_RFC_BOOKED)) & (df_cl['_prod'] == 'HT') ][col_bal].sum()) \
           - fraudes_HT_INT
 
     H31 = -(df_net_ni[(df_net_ni['_prod'] == 'ONA') & (df_net_ni['_di'] == 'INT')][col_bal].sum()) \
-          -(df_cl[(df_cl['Account_Num'] == 49102) & (df_cl['_prod'] == 'ONA')][col_bal].sum()) \
+          -(df_cl[(df_cl['Account_Num'].isin(ACCT_RFC_BOOKED)) & (df_cl['_prod'] == 'ONA')][col_bal].sum()) \
           - fraudes_ONA_INT
 
     # ── INGRESOS LICENCIAS (D31/E31/F31): base local (DOM+N/A) + fraudes locales ──
@@ -1074,15 +1055,15 @@ def calcular_chile_hoja_llave(df_balance_raw, llaves_ordenes, tc_clp, mes_base=1
 
     # ── LICENCIAS — catch-up YTD + accrual mensual (en CLP, luego USD) ──────
     # Booked Marca: 70104 por producto. ONA incluye VP (E69 = E11 + F11 en Segmentación)
-    D65 = df_cl[(df_cl['Account_Num'] == 70104) & (df_cl['_prod'] == 'VUELOS')][col_bal].sum()
-    E65 = df_cl[(df_cl['Account_Num'] == 70104) & (df_cl['_prod'] == 'HT')   ][col_bal].sum()
-    F65 = df_cl[(df_cl['Account_Num'] == 70104) &
+    D65 = df_cl[(df_cl['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_cl['_prod'] == 'VUELOS')][col_bal].sum()
+    E65 = df_cl[(df_cl['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_cl['_prod'] == 'HT')   ][col_bal].sum()
+    F65 = df_cl[(df_cl['Account_Num'].isin(ACCT_MARCA_BOOKED)) &
                  df_cl['_prod'].isin(['ONA', 'VUELOS PAQUETES'])][col_bal].sum()
 
     # Booked IT: 70105 por producto. ONA incluye VP (misma lógica que Marca)
-    D70 = df_cl[(df_cl['Account_Num'] == 70105) & (df_cl['_prod'] == 'VUELOS')][col_bal].sum()
-    E70 = df_cl[(df_cl['Account_Num'] == 70105) & (df_cl['_prod'] == 'HT')   ][col_bal].sum()
-    F70 = df_cl[(df_cl['Account_Num'] == 70105) &
+    D70 = df_cl[(df_cl['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_cl['_prod'] == 'VUELOS')][col_bal].sum()
+    E70 = df_cl[(df_cl['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_cl['_prod'] == 'HT')   ][col_bal].sum()
+    F70 = df_cl[(df_cl['Account_Num'].isin(ACCT_IT_BOOKED)) &
                  df_cl['_prod'].isin(['ONA', 'VUELOS PAQUETES'])][col_bal].sum()
 
     D61 = D31 * TASA_MARCA;  E61 = E31 * TASA_MARCA;  F61 = F31 * TASA_MARCA
@@ -1199,7 +1180,7 @@ def calcular_peru_hoja_llave(df_balance_raw, llaves_ordenes, tc_pen, mes_base=10
 
     # ── Fraudes (53300/53305) — split por producto/segmento ──────────────────
     def _fraudes(prod=None, di=None):
-        mask = df_pe['Account_Num'].isin([53300, 53305])
+        mask = df_pe['Account_Num'].isin(ACCT_FRAUDES)
         if prod is not None:
             mask &= (df_pe['_prod'] == prod) if isinstance(prod, str) \
                     else df_pe['_prod'].isin(prod)
@@ -1232,12 +1213,12 @@ def calcular_peru_hoja_llave(df_balance_raw, llaves_ordenes, tc_pen, mes_base=10
           - fraudes_ONA_DOM - fraudes_VP
 
     # G31/H31: ingresos INT + 49102 ya facturado − fraudes INT
-    _49102_HT  = df_pe[(df_pe['Account_Num'] == 49102) & (df_pe['_prod'] == 'HT')][col_bal].sum()
-    _49102_ONA = df_pe[(df_pe['Account_Num'] == 49102) & (df_pe['_prod'] == 'ONA')][col_bal].sum()
+    _rfc_booked_HT  = df_pe[(df_pe['Account_Num'].isin(ACCT_RFC_BOOKED)) & (df_pe['_prod'] == 'HT')][col_bal].sum()
+    _rfc_booked_ONA = df_pe[(df_pe['Account_Num'].isin(ACCT_RFC_BOOKED)) & (df_pe['_prod'] == 'ONA')][col_bal].sum()
     G31 = -(df_net_ni[(df_net_ni['_prod'] == 'HT')  & (df_net_ni['_di'] == 'INT')][col_bal].sum()) \
-          - _49102_HT - fraudes_HT_INT
+          - _rfc_booked_HT - fraudes_HT_INT
     H31 = -(df_net_ni[(df_net_ni['_prod'] == 'ONA') & (df_net_ni['_di'] == 'INT')][col_bal].sum()) \
-          - _49102_ONA - fraudes_ONA_INT
+          - _rfc_booked_ONA - fraudes_ONA_INT
 
     # ── COSTOS (en PEN) ───────────────────────────────────────────────────────
     MARKUP_RFC_PE = 1 + ENTITY_CONFIG[115]['markup_rfc']
@@ -1271,12 +1252,12 @@ def calcular_peru_hoja_llave(df_balance_raw, llaves_ordenes, tc_pen, mes_base=10
     RFC     = RFC_PEN / tc_pen
 
     # ── LICENCIAS — catch-up YTD + accrual mensual (en PEN → USD) ────────────
-    D65 = df_pe[(df_pe['Account_Num'] == 70104) & (df_pe['_prod'] == 'VUELOS')][col_bal].sum()
-    E65 = df_pe[(df_pe['Account_Num'] == 70104) & (df_pe['_prod'] == 'HT')   ][col_bal].sum()
-    F65 = df_pe[(df_pe['Account_Num'] == 70104) & (df_pe['_prod'] == 'ONA')  ][col_bal].sum()
-    D70 = df_pe[(df_pe['Account_Num'] == 70105) & (df_pe['_prod'] == 'VUELOS')][col_bal].sum()
-    E70 = df_pe[(df_pe['Account_Num'] == 70105) & (df_pe['_prod'] == 'HT')   ][col_bal].sum()
-    F70 = df_pe[(df_pe['Account_Num'] == 70105) & (df_pe['_prod'] == 'ONA')  ][col_bal].sum()
+    D65 = df_pe[(df_pe['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_pe['_prod'] == 'VUELOS')][col_bal].sum()
+    E65 = df_pe[(df_pe['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_pe['_prod'] == 'HT')   ][col_bal].sum()
+    F65 = df_pe[(df_pe['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_pe['_prod'] == 'ONA')  ][col_bal].sum()
+    D70 = df_pe[(df_pe['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_pe['_prod'] == 'VUELOS')][col_bal].sum()
+    E70 = df_pe[(df_pe['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_pe['_prod'] == 'HT')   ][col_bal].sum()
+    F70 = df_pe[(df_pe['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_pe['_prod'] == 'ONA')  ][col_bal].sum()
 
     D61 = D31 * TASA_MARCA;  E61 = E31 * TASA_MARCA;  F61 = F31 * TASA_MARCA
     D62 = D31 * TASA_IT;     E62 = E31 * TASA_IT;     F62 = F31 * TASA_IT
@@ -1333,16 +1314,15 @@ def calcular_usa_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
           G33 = E18×llave_HI + (M5_rfc×llave_HT)×llave_INT   (costos imputados HT-INT)
           H33 = F18×llave_OI + (M5_rfc×llave_ONA)×llave_INT  (costos imputados ONA-INT)
           E18/F18 = costos directos HT/ONA non-IC (excluye incentivos, non-op, EXCL_COST_ACCOUNTS)
-          M5_rfc  = CORPORATE CORP_RFC_PL1 non-IC − Costos_Hosting
+          M5_rfc  = CORPORATE (PL_Totalizador ∈ RFC_COST_RUBROS) non-IC − Costos_Hosting
 
     Lógica específica USA (diferencias vs Ecuador):
       - Costos_Hosting: filtra por Mapeo PL Nivel 1 == 'IT - Personnel/Expenses' (CORPORATE non-IC)
         No usa PL_Totalizador (cobertura incompleta para cuentas USA)
         ✅ Validado Nov-25: 1,394,173.78
-      - M5: filtra por CORP_RFC_PL1_USA (excluye impuestos, CC, marketing, intereses, FX)
-        ✅ Validado Nov-25: 2,483,539.18 (ajuste cuentas 80101/80102/64341 vs Estimado!M6)
-      - E18/F18: excluye EXCL_PL1_USA = incentivos + non-op (Back End/Other/Up Front Incentives,
-        Interest Income, FX/Other)
+      - M5: usa PL_Totalizador ∈ RFC_COST_RUBROS (template-driven, cubre 68200 Sourcing y otras)
+        ✅ Validado Abr-26: 1,145,674.05 (ref: 1,145,674.06)
+      - E18/F18: usa PL_Totalizador ∈ RFC_COST_RUBROS (incentivos/intereses/FX excluidos automáticamente)
       - Hosting: (Costos_Hosting × 1.06 − Ya_49120) + Costos_Hosting × 1.06 / mes_base
         ✅ Validado Nov-25: $117,941.08
       - 70104/70105: son INGRESOS (cuenta de crédito = negativo en Oracle) en USA,
@@ -1430,7 +1410,7 @@ def calcular_usa_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
     #   E31 = -Ingresos!C18        donde C18 = C5 + fraudes_HT_DOM
     #   D5 = GETPIVOTDATA(HT, INT) = 12,150.05  | C5 = GETPIVOTDATA(HT, DOM) = 1,845.79
     # ✅ Validado vs Segmentación Nov-2025: G31=1,058,491.84 | E31=5,580.24
-    _fraudes       = df_usa[df_usa['Account_Num'].isin([53300, 53305])]
+    _fraudes       = df_usa[df_usa['Account_Num'].isin(ACCT_FRAUDES)]
     fraudes_VUE    = -(_fraudes[_fraudes['_prod'] == 'VUELOS'         ][col_bal].sum())  # +11,793.48
     fraudes_HT_INT =   _fraudes[(_fraudes['_prod'] == 'HT') & (_fraudes['_di'] == 'INT')][col_bal].sum()  # +4,054.11 (débito)
     fraudes_HT_DOM =   _fraudes[(_fraudes['_prod'] == 'HT') & (_fraudes['_di'] == 'DOM')][col_bal].sum()  # -7,426.03 (crédito)
@@ -1441,13 +1421,13 @@ def calcular_usa_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
     # fraudes_HT_INT = +4,054.11 (débito = costo que reduce G31)
     # ✅ G31 = -(12,150.05 + 4,054.11) + 1,074,696 = 1,058,491.84
     G31 = -(df_net_ni[(df_net_ni['_prod'] == 'HT') & (df_net_ni['_di'] == 'INT')][col_bal].sum()) \
-          -(df_usa[(df_usa['Account_Num'] == 49102) & (df_usa['_prod'] == 'HT') ][col_bal].sum()) \
+          -(df_usa[(df_usa['Account_Num'].isin(ACCT_RFC_BOOKED)) & (df_usa['_prod'] == 'HT') ][col_bal].sum()) \
           - fraudes_HT_INT
 
     # H31: ONA INT income + 49102 ONA + fraudes ONA (100% INT, confirmado ✅)
     # ✅ 37,149.56 + 2,094.40 = 39,243.96 match exacto vs Excel H31.
     H31 = -(df_net_ni[(df_net_ni['_prod'] == 'ONA') & (df_net_ni['_di'] == 'INT')][col_bal].sum()) \
-          -(df_usa[(df_usa['Account_Num'] == 49102) & (df_usa['_prod'] == 'ONA')][col_bal].sum()) \
+          -(df_usa[(df_usa['Account_Num'].isin(ACCT_RFC_BOOKED)) & (df_usa['_prod'] == 'ONA')][col_bal].sum()) \
           + fraudes_ONA
 
     # D31: Vuelos income (todos DOM/INT/N/A) + fraudes VUELOS
@@ -1479,7 +1459,7 @@ def calcular_usa_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
         _ic_restar = df_usa[
             (df_usa[col_pl1] == HOSTING_PL1_USA) &
             (df_usa[col_pl2] == 'Intercompany Transactions') &
-            (df_usa['Account_Num'].isin([70105, 70114]))
+            (df_usa['Account_Num'].isin(ACCT_IT_BOOKED | ACCT_IT_MANT_BOOKED))
         ][col_bal].sum()
         Costos_Hosting = _total_it - _ic_restar
     else:
@@ -1488,26 +1468,9 @@ def calcular_usa_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
         print("⚠️  USA Hosting: columna 'Mapeo PL Nivel 1' no encontrada — usando fallback CORPORATE total")
 
     # ── COSTOS RFC ───────────────────────────────────────────────────────────
-    # E18/F18: costos directos HT/ONA non-IC, excluye:
-    #   - EXCL_COST_ACCOUNTS (64201, 64202, 68210, 41311, 41312, 53300, 53305)
-    #   - EXCL_PL1_USA = incentivos de ingresos (Back End/Other/Up Front Incentives)
-    #                  + categorías no operativas (Interest Income, FX/Other)
-    # Se usa Mapeo PL Nivel 1 nativo (no PL_Totalizador, cobertura incompleta en USA)
-    if col_pl1 is not None:
-        mask_ht = (
-            (df_ni['_prod'] == 'HT') &
-            (~df_ni['Account_Num'].isin(EXCL_COST_ACCOUNTS)) &
-            (~df_ni[col_pl1].isin(EXCL_PL1_USA))
-        )
-        mask_ona = (
-            (df_ni['_prod'] == 'ONA') &
-            (~df_ni['Account_Num'].isin(EXCL_COST_ACCOUNTS)) &
-            (~df_ni[col_pl1].isin(EXCL_PL1_USA))
-        )
-        E18_total = df_ni[mask_ht ][col_bal].sum()
-        F18_total = df_ni[mask_ona][col_bal].sum()
-    elif df_usa_pl is not None:
-        # Fallback: usa PL_Totalizador si no hay Mapeo PL Nivel 1
+    # E18/F18: costos directos HT/ONA — PL_Totalizador ∈ RFC_COST_RUBROS, non-IC.
+    # Incentivos/intereses/FX excluidos automáticamente (mapean fuera de RFC_COST_RUBROS).
+    if df_usa_pl is not None:
         df_costs_base = df_usa_pl[
             (df_usa_pl['PL_Totalizador'].isin(RFC_COST_RUBROS)) &
             (~df_usa_pl['_is_ic']) &
@@ -1515,40 +1478,25 @@ def calcular_usa_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
         ]
         E18_total = df_costs_base[df_costs_base['_prod'] == 'HT' ][col_bal].sum()
         F18_total = df_costs_base[df_costs_base['_prod'] == 'ONA'][col_bal].sum()
-        print("⚠️  USA E18/F18: usando PL_Totalizador como fallback (Mapeo PL Nivel 1 no disponible)")
     else:
         E18_total = 0.0
         F18_total = 0.0
-        print("⚠️  USA E18/F18: sin columna PL Nivel 1 ni diccionario PL — valores en 0")
+        print("❌ USA E18/F18: template PL no disponible — subir template_rubros.xlsx")
 
-    # M5 total (CORPORATE non-IC, solo categorías CORP_RFC_PL1_USA)
-    # Fórmula validada vs Estimado!M6 del Excel (= 2,483,539.18):
-    #   Base = CORP_RFC_PL1_USA excl. CORP_M5_EXCL_ACCOUNTS
-    #          + CORP_M5_EXTRA_ACCOUNTS (incluir aunque su PL1 no esté en CORP_RFC_PL1_USA)
-    # ✅ Validado Nov-25: 2,483,539.18 (ajuste de cuentas 80101/80102/64341)
-    if col_pl1 is not None:
-        mask_m5_base  = (
-            (df_ni['_prod'] == 'CORPORATE') &
-            (df_ni[col_pl1].isin(CORP_RFC_PL1_USA)) &
-            (~df_ni['Account_Num'].isin(CORP_M5_EXCL_ACCOUNTS))
-        )
-        mask_m5_extra = (
-            (df_ni['_prod'] == 'CORPORATE') &
-            (df_ni['Account_Num'].isin(CORP_M5_EXTRA_ACCOUNTS))
-        )
-        M5 = df_ni[mask_m5_base | mask_m5_extra][col_bal].sum()
-    elif df_usa_pl is not None:
-        # Fallback: usa PL_Totalizador si no hay Mapeo PL Nivel 1
+    # M5 total (CORPORATE non-IC, PL_Totalizador ∈ RFC_COST_RUBROS del template)
+    # Path primario: df_usa_pl (merge con template_rubros) → cobertura completa de cuentas.
+    # Cualquier cuenta nueva se agrega en el template; no requiere cambio de código.
+    # ✅ Validado Abr-26: M5 = 1,145,674.05 (ref: 1,145,674.06 — diff rounding)
+    if df_usa_pl is not None:
         df_corp_m5 = df_usa_pl[
             (df_usa_pl['_prod'] == 'CORPORATE') &
             (df_usa_pl['PL_Totalizador'].isin(RFC_COST_RUBROS)) &
             (~df_usa_pl['_is_ic'])
         ]
         M5 = df_corp_m5[col_bal].sum()
-        print("⚠️  USA M5: usando PL_Totalizador como fallback (Mapeo PL Nivel 1 no disponible)")
     else:
-        M5 = df_ni[df_ni['_prod'] == 'CORPORATE'][col_bal].sum()
-        print("⚠️  USA M5: usando total CORPORATE como fallback — resultado puede ser incorrecto")
+        M5 = 0.0
+        print("❌ USA M5: template PL no disponible — subir template_rubros.xlsx")
 
     # M5_rfc: se EXCLUYE Hosting del corporate para RFC (los Hosting costs ya se
     # facturan por separado → no deben entrar dos veces en la base de costo del RFC)
@@ -1580,13 +1528,13 @@ def calcular_usa_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
     # 70104 (Marca) y 70105 (IT) son POSITIVOS en Oracle para USA (igual que Ecuador).
     # ✅ Validado Nov-2025: 70104 VUELOS = +21,365 | 70105 VUELOS = +42,731
     # NO aplicar negación — los valores ya representan el monto ya contabilizado.
-    D65 = df_usa[(df_usa['Account_Num'] == 70104) & (df_usa['_prod'] == 'VUELOS')][col_bal].sum()
-    E65 = df_usa[(df_usa['Account_Num'] == 70104) & (df_usa['_prod'] == 'HT')   ][col_bal].sum()
-    F65 = df_usa[(df_usa['Account_Num'] == 70104) & (df_usa['_prod'] == 'ONA')  ][col_bal].sum()
+    D65 = df_usa[(df_usa['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_usa['_prod'] == 'VUELOS')][col_bal].sum()
+    E65 = df_usa[(df_usa['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_usa['_prod'] == 'HT')   ][col_bal].sum()
+    F65 = df_usa[(df_usa['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_usa['_prod'] == 'ONA')  ][col_bal].sum()
 
-    D70 = df_usa[(df_usa['Account_Num'] == 70105) & (df_usa['_prod'] == 'VUELOS')][col_bal].sum()
-    E70 = df_usa[(df_usa['Account_Num'] == 70105) & (df_usa['_prod'] == 'HT')   ][col_bal].sum()
-    F70 = df_usa[(df_usa['Account_Num'] == 70105) & (df_usa['_prod'] == 'ONA')  ][col_bal].sum()
+    D70 = df_usa[(df_usa['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_usa['_prod'] == 'VUELOS')][col_bal].sum()
+    E70 = df_usa[(df_usa['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_usa['_prod'] == 'HT')   ][col_bal].sum()
+    F70 = df_usa[(df_usa['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_usa['_prod'] == 'ONA')  ][col_bal].sum()
 
     D61 = D31 * TASA_MARCA;   E61 = E31 * TASA_MARCA;   F61 = F31 * TASA_MARCA
     D62 = D31 * TASA_IT;      E62 = E31 * TASA_IT;      F62 = F31 * TASA_IT
@@ -1610,7 +1558,7 @@ def calcular_usa_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
     # Validación Nov-2025:
     #   Costos=1,394,173.78 | Ya=1,507,665.55 | mes=10
     #   → (1,477,824.21 − 1,507,665.55) + 147,782.42 = $117,941.08 ✅
-    Ya_Hosting    = -(df_usa[df_usa['Account_Num'] == 49120][col_bal].sum())
+    Ya_Hosting    = -(df_usa[df_usa['Account_Num'].isin(ACCT_HOSTING_BOOKED)][col_bal].sum())
     Gastos_Hosting = Costos_Hosting * MARKUP_HOSTING
     Hosting        = (Gastos_Hosting - Ya_Hosting) + Gastos_Hosting / mes_base
 
@@ -1700,7 +1648,7 @@ def calcular_tr_hoja_llave(df_balance_raw, mes_base=2):
 
     # ── Fraudes (53300/53305) por producto ───────────────────────────────────
     # Se suman al Net Revenue antes de calcular la regalia (confirmado vs Excel)
-    _fraudes = df_tr[df_tr['Account_Num'].isin([53300, 53305])]
+    _fraudes = df_tr[df_tr['Account_Num'].isin(ACCT_FRAUDES)]
     fr_vuelos = _fraudes[_fraudes['_prod'] == 'VUELOS'][col_bal].sum()
     fr_ht     = _fraudes[_fraudes['_prod'] == 'HT'][col_bal].sum()
     fr_ona    = _fraudes[_fraudes['_prod'].isin(['ONA', 'VUELOS PAQUETES'])][col_bal].sum()
@@ -1716,9 +1664,9 @@ def calcular_tr_hoja_llave(df_balance_raw, mes_base=2):
     real_ona    = -(total_ona) * TASA_IT
 
     # ── Booked 70105 por producto (ONA incluye VP) ──────────────────────────
-    booked_vuelos = df_tr[(df_tr['Account_Num'] == 70105) & (df_tr['_prod'] == 'VUELOS')][col_bal].sum()
-    booked_ht     = df_tr[(df_tr['Account_Num'] == 70105) & (df_tr['_prod'] == 'HT')][col_bal].sum()
-    booked_ona    = df_tr[(df_tr['Account_Num'] == 70105) &
+    booked_vuelos = df_tr[(df_tr['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_tr['_prod'] == 'VUELOS')][col_bal].sum()
+    booked_ht     = df_tr[(df_tr['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_tr['_prod'] == 'HT')][col_bal].sum()
+    booked_ona    = df_tr[(df_tr['Account_Num'].isin(ACCT_IT_BOOKED)) &
                           df_tr['_prod'].isin(['ONA', 'VUELOS PAQUETES'])][col_bal].sum()
 
     # ── Facturación = (Real - Booked) + Real / mes_base ─────────────────────
@@ -1803,7 +1751,7 @@ def calcular_espana_hoja_llave(df_balance_raw, tc_eur, mes_base=2):
     # España típicamente no tiene 53300/53305 — sus ajustes menores (Ajustes de
     # Tolerancia) vienen de cuentas que ya están en PL='Net Revenues'.
     # Se buscan igualmente por robustez.
-    _fraudes = df_esp[df_esp['Account_Num'].isin([53300, 53305])]
+    _fraudes = df_esp[df_esp['Account_Num'].isin(ACCT_FRAUDES)]
     fr_ht  = _fraudes[_fraudes['_prod'] == 'HT'][col_bal].sum()
     fr_ona = _fraudes[_fraudes['_prod'] == 'ONA'][col_bal].sum()
 
@@ -1817,10 +1765,10 @@ def calcular_espana_hoja_llave(df_balance_raw, tc_eur, mes_base=2):
     real_mk_ona = -(total_ona) * TASA_MARCA
 
     # ── Booked IT (70105) y Marca (70104) ───────────────────────────────────
-    booked_it_ht  = df_esp[(df_esp['Account_Num'] == 70105) & (df_esp['_prod'] == 'HT')][col_bal].sum()
-    booked_it_ona = df_esp[(df_esp['Account_Num'] == 70105) & (df_esp['_prod'] == 'ONA')][col_bal].sum()
-    booked_mk_ht  = df_esp[(df_esp['Account_Num'] == 70104) & (df_esp['_prod'] == 'HT')][col_bal].sum()
-    booked_mk_ona = df_esp[(df_esp['Account_Num'] == 70104) & (df_esp['_prod'] == 'ONA')][col_bal].sum()
+    booked_it_ht  = df_esp[(df_esp['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_esp['_prod'] == 'HT')][col_bal].sum()
+    booked_it_ona = df_esp[(df_esp['Account_Num'].isin(ACCT_IT_BOOKED)) & (df_esp['_prod'] == 'ONA')][col_bal].sum()
+    booked_mk_ht  = df_esp[(df_esp['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_esp['_prod'] == 'HT')][col_bal].sum()
+    booked_mk_ona = df_esp[(df_esp['Account_Num'].isin(ACCT_MARCA_BOOKED)) & (df_esp['_prod'] == 'ONA')][col_bal].sum()
 
     # ── Facturación IT = (Real - Booked) + Real / mes_base ──────────────────
     fact_it_ht  = (real_it_ht - booked_it_ht) + real_it_ht / mes_base
@@ -1983,7 +1931,7 @@ def calcular_brasil_hoja_llave(df_balance_raw, llaves_ordenes, tc_brl, mes_base=
 
     # ── Booked licencias ──
     # 70104: Marca (subcuenta 2/402/403/404) y Dominio (subcuenta 1/401)
-    booked_70104 = df_br[(df_br['_acct'] == '70104') & is_ic]
+    booked_70104 = df_br[(df_br['_acct'].isin({str(a) for a in ACCT_MARCA_BOOKED})) & is_ic]
     marca_booked = {'VUELOS': 0, 'HT': 0, 'ONA': 0}
     dom_booked = {'VUELOS': 0, 'HT': 0, 'ONA': 0}
     col_sub = next((c for c in df_br.columns if 'Subcuenta' in c and 'Nombre' not in c), None)
@@ -1997,7 +1945,7 @@ def calcular_brasil_hoja_llave(df_balance_raw, llaves_ordenes, tc_brl, mes_base=
                 marca_booked[prod] = marca_booked.get(prod, 0) + row[col_bal]
 
     # 70105: IT
-    booked_70105 = df_br[df_br['_acct'] == '70105']
+    booked_70105 = df_br[df_br['_acct'].isin({str(a) for a in ACCT_IT_BOOKED})]
     it_booked = {'VUELOS': 0, 'HT': 0, 'ONA': 0}
     if not booked_70105.empty:
         for _, row in booked_70105.iterrows():
@@ -2056,7 +2004,7 @@ def calcular_brasil_hoja_llave(df_balance_raw, llaves_ordenes, tc_brl, mes_base=
     if col_rc is None:
         df_br['_resp_cargo'] = df_br['Combinacion Contable'].str.split('.').str[3]
         col_rc = '_resp_cargo'
-    c49102 = df_br[(df_br['_acct'] == '49102') & is_ic]
+    c49102 = df_br[(df_br['_acct'].isin({str(a) for a in ACCT_RFC_BOOKED})) & is_ic]
     rc601_ht = c49102[(c49102[col_rc] == '601') & (c49102['_prod'] == 'HT')][col_bal].sum()
     rc601_ona = c49102[(c49102[col_rc] == '601') & (c49102['_prod'] == 'ONA')][col_bal].sum()
     rc611_ht = c49102[(c49102[col_rc] == '611') & (c49102['_prod'] == 'HT')][col_bal].sum()
@@ -2207,14 +2155,14 @@ def calcular_mexico_hoja_llave(df_balance_raw, llaves_ordenes, tc_mxn, mes_base=
 
     # ── Booked licencias ──
     # 70104 = Marca, 70105 = IT (por producto, sin split subcuenta)
-    booked_70104 = df_mx[(df_mx['_acct'] == '70104') & is_ic]
+    booked_70104 = df_mx[(df_mx['_acct'].isin({str(a) for a in ACCT_MARCA_BOOKED})) & is_ic]
     marca_booked = {'VUELOS': 0, 'HT': 0, 'ONA': 0}
     for _, row in booked_70104.iterrows():
         prod = PROD_MAP.get(int(row['_prod_code']) if pd.notna(row['_prod_code']) else -1, 'OTRO')
         if prod in marca_booked:
             marca_booked[prod] += row[col_bal]
 
-    booked_70105 = df_mx[df_mx['_acct'] == '70105']
+    booked_70105 = df_mx[df_mx['_acct'].isin({str(a) for a in ACCT_IT_BOOKED})]
     it_booked = {'VUELOS': 0, 'HT': 0, 'ONA': 0}
     for _, row in booked_70105.iterrows():
         prod = PROD_MAP.get(int(row['_prod_code']) if pd.notna(row['_prod_code']) else -1, 'OTRO')
@@ -2408,14 +2356,14 @@ def calcular_colombia_hoja_llave(df_balance_raw, llaves_ordenes, tc_cop, mes_bas
     ona = ona_raw + vp
 
     # Booked
-    booked_70104 = df_co[(df_co['_acct'] == '70104') & is_ic]
+    booked_70104 = df_co[(df_co['_acct'].isin({str(a) for a in ACCT_MARCA_BOOKED})) & is_ic]
     marca_booked = {'VUELOS': 0, 'HT': 0, 'ONA': 0}
     for _, row in booked_70104.iterrows():
         prod = PROD_MAP.get(int(row['_prod_code']) if pd.notna(row['_prod_code']) else -1, 'OTRO')
         if prod in marca_booked:
             marca_booked[prod] += row[col_bal]
 
-    booked_70105 = df_co[df_co['_acct'] == '70105']
+    booked_70105 = df_co[df_co['_acct'].isin({str(a) for a in ACCT_IT_BOOKED})]
     it_booked = {'VUELOS': 0, 'HT': 0, 'ONA': 0}
     for _, row in booked_70105.iterrows():
         prod = PROD_MAP.get(int(row['_prod_code']) if pd.notna(row['_prod_code']) else -1, 'OTRO')
@@ -2434,7 +2382,7 @@ def calcular_colombia_hoja_llave(df_balance_raw, llaves_ordenes, tc_cop, mes_bas
     def int_sum(df, prod):
         return df[(df['_prod'] == prod) & (df['_di'] == 'INT')][col_bal].sum()
 
-    c49102 = df_co[(df_co['_acct'] == '49102') & is_ic]
+    c49102 = df_co[(df_co['_acct'].isin({str(a) for a in ACCT_RFC_BOOKED})) & is_ic]
     nr_ht_int = int_sum(df_nr_nf, 'HT') + c49102[c49102['_prod'] == 'HT'][col_bal].sum()
     nr_ona_int = int_sum(df_nr_nf, 'ONA') + c49102[c49102['_prod'] == 'ONA'][col_bal].sum()
     fr_ht_int = int_sum(df_fraudes, 'HT')
@@ -2707,6 +2655,96 @@ def ejecutar_alertas(df_balance, df_pl, tc_dict):
 # PROCESO COMPLETO
 # ============================================================================
 
+def cargar_globals_desde_template():
+    """Carga todos los globals del motor desde template_rubros.xlsx.
+    Se llama desde ejecutar_proceso_completo() (CLI) y desde ejecutar_calculo() (app).
+    """
+    global PROD_MAP, DI_MAP, DI_INT, RFC_COST_RUBROS
+    global ENTITY_CONFIG, TASA_MARCA, TASA_IT, HOSTING_PL1_USA
+    global EXCL_COST_ACCOUNTS
+    global ACCT_FRAUDES, ACCT_RFC_BOOKED, ACCT_MARCA_BOOKED, ACCT_IT_BOOKED, ACCT_HOSTING_BOOKED, ACCT_IT_MANT_BOOKED
+    global MAPEO_PAIS_POS
+
+    # ── PROD_MAP ────────────────────────────────────────────────────────────
+    df_glosario = cargar_glosario(RUTA_RUBROS)
+    if df_glosario is not None and 'COD' in df_glosario.columns and 'SEGMENTACION' in df_glosario.columns:
+        _tp = df_glosario.dropna(subset=['COD', 'SEGMENTACION'])
+        PROD_MAP = dict(zip(_tp['COD'].astype(int), _tp['SEGMENTACION'].astype(str)))
+    else:
+        PROD_MAP = {}
+
+    # ── DI_MAP ──────────────────────────────────────────────────────────────
+    try:
+        _td = pd.read_excel(RUTA_RUBROS, sheet_name='DOM_INT').dropna(subset=['Negocio2', 'DOM/INT'])
+        DI_MAP = dict(zip(_td['Negocio2'].astype(int), _td['DOM/INT'].astype(str)))
+        DI_INT = {str(k).zfill(4) for k, v in DI_MAP.items() if v == 'INT'}
+    except Exception:
+        DI_MAP = {1: 'DOM', 2: 'INT', 101: 'DOM', 102: 'INT', 111: 'DOM', 112: 'INT', 121: 'DOM', 300: 'Iniciativas'}
+        DI_INT = {'0002', '0102', '0112'}
+
+    # ── RFC_COST_RUBROS ─────────────────────────────────────────────────────
+    try:
+        _tr = pd.read_excel(RUTA_RUBROS, sheet_name='RFC_Cost_Rubros')
+        RFC_COST_RUBROS = set(_tr['PL Totalizador'].dropna().unique())
+    except Exception:
+        RFC_COST_RUBROS = {
+            'Total Cost of Revenue', 'Total Technology and content',
+            'Total Sales & Marketing', 'Total General and Administrative',
+        }
+
+    # ── Entity_Config ───────────────────────────────────────────────────────
+    try:
+        _tmpl_ec = pd.read_excel(RUTA_RUBROS, sheet_name='Entity_Config')
+        _tmpl_ec['Entidad'] = pd.to_numeric(_tmpl_ec['Entidad'], errors='coerce')
+        for _, row in _tmpl_ec.dropna(subset=['Entidad']).iterrows():
+            eid = int(row['Entidad'])
+            cfg = ENTITY_CONFIG.setdefault(eid, {})
+            if pd.notna(row.get('Markup_RFC')):     cfg['markup_rfc']     = float(row['Markup_RFC'])
+            if pd.notna(row.get('Markup_Hosting')): cfg['markup_hosting'] = float(row['Markup_Hosting'])
+            if pd.notna(row.get('Tasa_Marca')):     cfg['tasa_marca']     = float(row['Tasa_Marca'])
+            if pd.notna(row.get('Tasa_IT')):        cfg['tasa_it']        = float(row['Tasa_IT'])
+            if pd.notna(row.get('Hosting_PL1')) and str(row['Hosting_PL1']).strip():
+                cfg['hosting_pl1'] = str(row['Hosting_PL1']).strip()
+        TASA_MARCA      = ENTITY_CONFIG.get(113, {}).get('tasa_marca',  TASA_MARCA)
+        TASA_IT         = ENTITY_CONFIG.get(113, {}).get('tasa_it',     TASA_IT)
+        HOSTING_PL1_USA = ENTITY_CONFIG.get(105, {}).get('hosting_pl1', HOSTING_PL1_USA)
+    except Exception as e:
+        print(f"  ⚠️  Entity_Config: no se pudo cargar ({e})")
+
+    # ── EXCL_COST_ACCOUNTS ──────────────────────────────────────────────────
+    try:
+        _tmpl_excl = pd.read_excel(RUTA_RUBROS, sheet_name='Cuentas_Excluidas')
+        _tmpl_excl['Cuenta'] = pd.to_numeric(_tmpl_excl['Cuenta'], errors='coerce')
+        EXCL_COST_ACCOUNTS = set(_tmpl_excl[_tmpl_excl['Calculo'] == 'E18']['Cuenta'].dropna().astype(int))
+    except Exception as e:
+        print(f"  ❌ EXCL_COST_ACCOUNTS: no se pudo cargar ({e})")
+
+    # ── Account_Config ──────────────────────────────────────────────────────
+    try:
+        _tmpl_ac = pd.read_excel(RUTA_RUBROS, sheet_name='Account_Config')
+        _tmpl_ac['Cuenta'] = pd.to_numeric(_tmpl_ac['Cuenta'], errors='coerce')
+        def _accts(concepto):
+            return set(_tmpl_ac[_tmpl_ac['Concepto'] == concepto]['Cuenta'].dropna().astype(int))
+        ACCT_FRAUDES        = _accts('Fraudes')
+        ACCT_RFC_BOOKED     = _accts('RFC_booked')
+        ACCT_MARCA_BOOKED   = _accts('Marca_booked')
+        ACCT_IT_BOOKED      = _accts('IT_booked')
+        ACCT_HOSTING_BOOKED = _accts('Hosting_booked')
+        ACCT_IT_MANT_BOOKED = _accts('IT_Mant_booked')
+    except Exception as e:
+        print(f"  ❌ Account_Config: no se pudo cargar ({e})")
+
+    # ── POS_Config ──────────────────────────────────────────────────────────
+    try:
+        _tmpl_pos = pd.read_excel(RUTA_RUBROS, sheet_name='POS_Config')
+        MAPEO_PAIS_POS = {
+            row['Pais']: int(row['Entidad']) if pd.notna(row['Entidad']) else 601
+            for _, row in _tmpl_pos.dropna(subset=['Pais']).iterrows()
+        }
+    except Exception as e:
+        print(f"  ❌ POS_Config: no se pudo cargar ({e})")
+
+
 def ejecutar_proceso_completo():
     print("\n" + "=" * 80)
     print("  🚀 SISTEMA DE FACTURACIÓN INTERCOMPANY")
@@ -2715,7 +2753,9 @@ def ejecutar_proceso_completo():
     mes_base = leer_periodo_balance(RUTA_BALANCE) or 10
     print(f"\n  📅 Período del balance: mes {mes_base} (base YTD para catch-up)\n")
 
-    # ── Cargar PL desde template_rubros.xlsx (hoja PL_Totalizador) ───────────
+    cargar_globals_desde_template()
+
+    # Imprimir resumen de lo cargado
     try:
         df_pl_template = pd.read_excel(RUTA_RUBROS, sheet_name='PL_Totalizador')
         df_pl_template['Cuenta'] = pd.to_numeric(df_pl_template['Cuenta'], errors='coerce')
@@ -2724,49 +2764,12 @@ def ejecutar_proceso_completo():
         print(f"  ❌ PL: no se pudo cargar desde template: {e}")
         df_pl_template = pd.DataFrame(columns=['Cuenta', 'PL_Totalizador'])
 
-    # ── Cargar glosario desde template_rubros.xlsx (hoja Productos) ────────
-    df_glosario = cargar_glosario(RUTA_RUBROS)
-    if df_glosario is not None:
-        print(f"  ✅ Glosario cargado desde template: {len(df_glosario)} productos")
-    else:
-        print(f"  ❌ Glosario: no se pudo cargar desde template")
-
-    # ── Construir PROD_MAP desde template (hoja Productos) ─────────────────
-    global PROD_MAP
-    if df_glosario is not None and 'COD' in df_glosario.columns and 'SEGMENTACION' in df_glosario.columns:
-        _tp = df_glosario.dropna(subset=['COD', 'SEGMENTACION'])
-        PROD_MAP = dict(zip(_tp['COD'].astype(int), _tp['SEGMENTACION'].astype(str)))
-        print(f"  ✅ PROD_MAP cargado desde template: {len(PROD_MAP)} códigos de producto")
-    else:
-        PROD_MAP = {}
-        print(f"  ❌ PROD_MAP: no se pudo cargar desde template")
-
-    # ── Construir DI_MAP desde template_rubros.xlsx (hoja DOM_INT) ─────────
-    global DI_MAP, DI_INT
-    try:
-        _tmpl_di = pd.read_excel(RUTA_RUBROS, sheet_name='DOM_INT')
-        _td = _tmpl_di.dropna(subset=['Negocio2', 'DOM/INT'])
-        DI_MAP = dict(zip(_td['Negocio2'].astype(int), _td['DOM/INT'].astype(str)))
-        DI_INT = {str(k).zfill(4) for k, v in DI_MAP.items() if v == 'INT'}
-        print(f"  ✅ DI_MAP cargado desde template: {len(DI_MAP)} códigos DOM/INT")
-        print(f"     DI_INT (códigos INT): {sorted(DI_INT)}")
-    except Exception as e:
-        DI_MAP = {1: 'DOM', 2: 'INT', 101: 'DOM', 102: 'INT', 111: 'DOM', 112: 'INT', 121: 'DOM', 300: 'Iniciativas'}
-        DI_INT = {'0002', '0102', '0112'}
-        print(f"  ⚠️  DI_MAP: no se pudo cargar desde template, usando default")
-
-    # ── Construir RFC_COST_RUBROS desde template_rubros.xlsx (hoja RFC_Cost_Rubros) ──
-    global RFC_COST_RUBROS
-    try:
-        _tmpl_rfc = pd.read_excel(RUTA_RUBROS, sheet_name='RFC_Cost_Rubros')
-        RFC_COST_RUBROS = set(_tmpl_rfc['PL Totalizador'].dropna().unique())
-        print(f"  ✅ RFC_COST_RUBROS cargado desde template: {RFC_COST_RUBROS}")
-    except Exception as e:
-        RFC_COST_RUBROS = {
-            'Total Cost of Revenue', 'Total Technology and content',
-            'Total Sales & Marketing', 'Total General and Administrative',
-        }
-        print(f"  ⚠️  RFC_COST_RUBROS: no se pudo cargar desde template, usando default")
+    print(f"  ✅ PROD_MAP: {len(PROD_MAP)} productos | DI_MAP: {len(DI_MAP)} códigos | DI_INT: {sorted(DI_INT)}")
+    print(f"  ✅ RFC_COST_RUBROS: {RFC_COST_RUBROS}")
+    print(f"  ✅ Entity_Config: {len(ENTITY_CONFIG)} entidades")
+    print(f"  ✅ EXCL_COST_ACCOUNTS: {sorted(EXCL_COST_ACCOUNTS)}")
+    print(f"  ✅ Account_Config: Fraudes={ACCT_FRAUDES}, RFC={ACCT_RFC_BOOKED}, Marca={ACCT_MARCA_BOOKED}, IT={ACCT_IT_BOOKED}, Hosting={ACCT_HOSTING_BOOKED}")
+    print(f"  ✅ POS_Config: {len(MAPEO_PAIS_POS)} países")
 
     df_balance  = procesar_balance(RUTA_BALANCE)
     df_ordenes, df_si = procesar_ordenes(RUTA_ORDENES)
@@ -2779,7 +2782,7 @@ def ejecutar_proceso_completo():
 
     llaves_ordenes = calcular_llaves_ordenes(df_si) if df_si is not None else {}
     llaves_adi     = calcular_llaves_adi(df_adi) if df_adi is not None else {}
-    llaves_revenue = calcular_llaves_revenue(df_balance, df_glosario)
+    llaves_revenue = calcular_llaves_revenue(df_balance)
 
     # ── TIPOS DE CAMBIO ───────────────────────────────────────────────────────
     tc = cargar_tc(RUTA_TC)
@@ -2860,14 +2863,6 @@ def ejecutar_proceso_completo():
         print(f"  {'Referencia de Clientes:':<30}  ${usa['RFC']:>14,.2f} USD")
         print(f"  {'Servicios de Hosting:':<30}  ${usa['Hosting']:>14,.2f} USD")
         print()
-        print("  ┌─────────────────────────────────────────────────────────────────────")
-        print("  │ ⚠️  HARDCODES USA — M5 Corporate (base RFC + Hosting)")
-        print("  │ QUÉ: Cuentas 80102 y 64341 incluidas manualmente en M5,")
-        print("  │   cuenta 80101 excluida manualmente de M5.")
-        print("  │   PL Nivel 1 no las clasifica correctamente para el RFC de USA.")
-        print("  │ SOLUCIÓN: Ajustar PL_actualizado.xlsx para que PL Nivel 1")
-        print("  │   refleje correctamente qué cuentas van a M5 CORPORATE.")
-        print("  └─────────────────────────────────────────────────────────────────────")
         print()
     else:
         print("  ⚠️  USA - Hoja Llave: Sin datos")
