@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import tempfile
 import io
+from datetime import datetime
 
 from motor import (
     leer_periodo_balance, cargar_glosario, cargar_pl, cargar_tc,
@@ -140,6 +141,17 @@ def generar_bajada_trabajada(rutas, r):
     exc_dict = dict(zip(tmpl_exc['Cuenta'].dropna().astype(int).astype(str), tmpl_exc['RUBRO'].dropna()))
     emp_dict = dict(zip(tmpl_emp['Codigo'].astype(int).astype(str), tmpl_emp['Empresa']))
 
+    # Lookup tables para columnas extra por entidad
+    tmpl_salgi  = pd.read_excel(rutas["rubros"], sheet_name='Salario_GastoInd')
+    tmpl_servar = pd.read_excel(rutas["rubros"], sheet_name='Servicios_AR')
+    tmpl_servmx = pd.read_excel(rutas["rubros"], sheet_name='Servicios_MX')
+    tmpl_lcc    = pd.read_excel(rutas["rubros"], sheet_name='Glosario_LocalCC')
+
+    salgi_dict  = dict(zip(tmpl_salgi['Cuenta'].astype(int).astype(str),       tmpl_salgi['SALARIO/GASTO INDIRECTO']))
+    servar_dict = dict(zip(tmpl_servar['Departamento'].astype(int).astype(str), tmpl_servar['Servicio AR']))
+    servmx_dict = dict(zip(tmpl_servmx['Departamento'].astype(int).astype(str), tmpl_servmx['Servicio MX']))
+    lcc_dict    = dict(zip(tmpl_lcc['RC'].astype(int).astype(str),              tmpl_lcc['LOCAL_CC']))
+
     # PL_TO_RUBRO desde template (hoja PL_RUBRO)
     tmpl_plr = pd.read_excel(rutas["rubros"], sheet_name='PL_RUBRO')
     PL_TO_RUBRO = dict(zip(tmpl_plr['PL Totalizador'].dropna(), tmpl_plr['RUBRO'].dropna()))
@@ -160,7 +172,14 @@ def generar_bajada_trabajada(rutas, r):
     dr_mapped = dpto_col[m60].map(dr_dict)
     gl.loc[m60 & dr_mapped.notna(), 'RUBRO'] = dr_mapped[dr_mapped.notna()]
     for a, rb in exc_dict.items():
-        gl.loc[gl['_acct'] == a, 'RUBRO'] = rb
+        mask = gl['_acct'] == a
+        if rb == 'FOLLOW_DPTO':
+            # Cuenta fuera de 60xxx pero que sigue la regla de Dpto (ej: 54055)
+            dr_mapped_exc = parts[5][mask].map(dr_dict)
+            gl.loc[mask & dr_mapped_exc.notna(), 'RUBRO'] = dr_mapped_exc[dr_mapped_exc.notna()]
+            gl.loc[mask & dr_mapped_exc.isna(), 'RUBRO'] = 'GENERAL'  # fallback si Dpto no mapeado
+        else:
+            gl.loc[mask, 'RUBRO'] = rb
 
     # Derive PL Totalizador (override for 60xxx)
     gl['MY_PLT'] = gl['PL_Totalizador']
@@ -179,23 +198,58 @@ def generar_bajada_trabajada(rutas, r):
         'Nota-': gl['Nota'], 'Subcuenta-': gl['Subcuenta'], 'Nombre subcuenta-': gl['Nombre subcuenta'],
         'Divisa-': gl['Divisa'], 'Saldo Inicial-': gl[col_si], 'Actv Periodo-': gl[col_ap],
         'Balance_Final': gl[col_b],
-        'E.Legal Cta': parts[0], 'Cuenta': gl['Cuenta_num'],
+        'E.Legal Cta': pd.to_numeric(parts[0], errors='coerce').astype('Int64'),
+        'Cuenta': gl['Cuenta_num'],
         'Cuenta_Descripcion': gl['Descripcion'],
         'Mapeo PL Nivel 1': gl['Mapeo PL Nivel 1'],
-        'RUBRO': gl['RUBRO'], 'Subcuenta': parts[2], 'Resp_Cargo': parts[3],
-        'Prod': parts[4], 'PRODUCTO': parts[4].map(PROD_MAP).fillna(''),
-        'Dpto': parts[5], 'Depto': parts[5].map(dd_dict).fillna(''),
-        'Canal': parts[6], 'Tipo Cliente': parts[7], 'Tipo Cobro': parts[8],
-        'Negocio': parts[9], 'DOM/INT': di_num.map(DI_MAP),
-        'Futuro2': parts[10] if 10 in parts.columns else '',
+        'RUBRO': gl['RUBRO'],
+        'Subcuenta': pd.to_numeric(parts[2], errors='coerce').astype('Int64'),
+        'Resp_Cargo': pd.to_numeric(parts[3], errors='coerce').astype('Int64'),
+        'Prod': pd.to_numeric(parts[4], errors='coerce').astype('Int64'),
+        'PRODUCTO': parts[4].map(PROD_MAP).fillna(''),
+        'Dpto': pd.to_numeric(parts[5], errors='coerce').astype('Int64'),
+        'Depto': parts[5].map(dd_dict).fillna(''),
+        'Canal': pd.to_numeric(parts[6], errors='coerce').astype('Int64'),
+        'Tipo Cliente': pd.to_numeric(parts[7], errors='coerce').astype('Int64'),
+        'Tipo Cobro': pd.to_numeric(parts[8], errors='coerce').astype('Int64'),
+        'Negocio': pd.to_numeric(parts[9], errors='coerce').astype('Int64'),
+        'DOM/INT': di_num.map(DI_MAP).fillna('N/A'),
+        'Futuro2': pd.to_numeric(parts[10] if 10 in parts.columns else None, errors='coerce').astype('Int64'),
         'Empresa': f2_num.map(emp_dict).fillna(''),
         'PL Totalizador': gl['MY_PLT'],
     })
+
+    # ── Columnas extra por entidad ──────────────────────────────────────────
+    ent = output['E.Legal Cta'].astype(str)
+    acct_str  = output['Cuenta'].astype(str)
+    dpto_str  = parts[5].reindex(output.index).fillna('').astype(str)
+    rc_str    = parts[3].reindex(output.index).fillna('').astype(str)
+
+    # SALARIO/GASTO INDIRECTO — entidades 101, 103, 125, 601
+    mask_sal = ent.isin(['101','103','125','601'])
+    output['SALARIO/GASTO INDIRECTO'] = ''
+    output.loc[mask_sal, 'SALARIO/GASTO INDIRECTO'] = acct_str[mask_sal].map(salgi_dict).fillna('')
+
+    # CÁLCULO (Servicios) — 101 usa ServAR, 103 usa ServMX
+    output['Cálculo'] = ''
+    mask_101 = ent == '101'
+    mask_103 = ent == '103'
+    # Convertir Dpto a string sin decimales para el lookup
+    dpto_int = pd.to_numeric(dpto_str, errors='coerce').astype('Int64').astype(str).replace('<NA>','')
+    output.loc[mask_101, 'Cálculo'] = dpto_int[mask_101].map(servar_dict).fillna('#N/A')
+    output.loc[mask_103, 'Cálculo'] = dpto_int[mask_103].map(servmx_dict).fillna('#N/A')
+
+    # LOCAL/CALL CENTER — entidad 116
+    mask_116 = ent == '116'
+    output['LOCAL/CALL CENTER'] = ''
+    rc_int = pd.to_numeric(rc_str, errors='coerce').astype('Int64').astype(str).replace('<NA>','')
+    output.loc[mask_116, 'LOCAL/CALL CENTER'] = rc_int[mask_116].map(lcc_dict).fillna('')
+
     return output
 
 
 def generar_excel_ordenes(rutas, r):
-    """Genera el Excel de Órdenes con 3 hojas: Ordenes FY 2026, HT, ONA"""
+    """Genera el Excel de Órdenes con 3 hojas: Ordenes FY {año}, HT, ONA"""
     try:
         _, df_si = procesar_ordenes(rutas["ordenes"])
         df_use = df_si[df_si['Usar'] == 'SI']
@@ -221,17 +275,15 @@ def generar_excel_ordenes(rutas, r):
         try: return int(pivot2.get((s, prod, trip), 0))
         except: return 0
 
-    countries = ['Argentina', 'Bolivia', 'Brasil', 'Chile', 'Colombia', 'Costa Rica',
-                 'Ecuador', 'El Salvador', 'España', 'Usa', 'Guatemala', 'Honduras',
-                 'International', 'Mexico', 'Nicaragua', 'Panama', 'Paraguay', 'Peru',
-                 'Puerto Rico', 'Republica Dominicana', 'Uruguay', 'Venezuela']
-    display = {c: c for c in countries}
-    display['Usa'] = 'USA'
+    _pos = pd.read_excel(rutas["rubros"], sheet_name='POS_Config')
+    countries = _pos['Pais'].dropna().tolist()
+    display = dict(zip(_pos['Pais'], _pos['Display'].fillna(_pos['Pais'])))
 
     mes = r.get("mes_base", 2)
+    year = datetime.now().year
     buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        # ── HOJA 1: Ordenes FY 2026 ──
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        # ── HOJA 1: Ordenes FY {year} ──
         rows_fy = []
         for s in countries:
             v = gv1(s, 'Vuelos', dom_vals) + gv1(s, 'Vuelos', int_vals)
@@ -253,7 +305,7 @@ def generar_excel_ordenes(rutas, r):
                 '  ': '', 'ONA+VP': od + oi,
             })
         df_fy = pd.DataFrame(rows_fy)
-        df_fy.to_excel(writer, sheet_name='Ordenes FY 2026', index=False, startrow=1)
+        df_fy.to_excel(writer, sheet_name=f'Ordenes FY {year}', index=False, startrow=1)
 
         # ── HOJA 2: HT ──
         rows_ht = []
@@ -296,6 +348,35 @@ def generar_excel_ordenes(rutas, r):
         df_ona = pd.DataFrame(rows_ona)
         df_ona.to_excel(writer, sheet_name='ONA', index=False, startrow=1)
 
+        # ── HOJA 4: Consolidado ──
+        rows_cons = []
+        for s in countries:
+            vuelos  = gv1(s, 'Vuelos', dom_vals) + gv1(s, 'Vuelos', int_vals)
+            hoteles = gv1(s, 'Hoteles', dom_vals) + gv1(s, 'Hoteles', int_vals)
+            ona     = gv1(s, 'ONA', dom_vals) + gv1(s, 'ONA', int_vals)
+            vp      = gv1(s, 'Vuelos Paquetes', dom_vals) + gv1(s, 'Vuelos Paquetes', int_vals)
+            total   = vuelos + hoteles + ona + vp
+            rows_cons.append({
+                'País': display[s],
+                'Vuelos': vuelos,
+                'Hoteles': hoteles,
+                'ONA': ona,
+                'Vuelos Paquetes': vp,
+                'Total': total,
+            })
+        # Agregar fila total
+        df_cons = pd.DataFrame(rows_cons)
+        total_row = pd.DataFrame([{
+            'País': 'TOTAL',
+            'Vuelos':          df_cons['Vuelos'].sum(),
+            'Hoteles':         df_cons['Hoteles'].sum(),
+            'ONA':             df_cons['ONA'].sum(),
+            'Vuelos Paquetes': df_cons['Vuelos Paquetes'].sum(),
+            'Total':           df_cons['Total'].sum(),
+        }])
+        df_cons = pd.concat([df_cons, total_row], ignore_index=True)
+        df_cons.to_excel(writer, sheet_name='Consolidado', index=False, startrow=1)
+
     return buffer.getvalue()
 
 
@@ -318,28 +399,8 @@ def ejecutar_calculo(rutas):
     motor.RUTA_TC = rutas["tc"]
     motor.RUTA_ADI = rutas["adi"]
 
-    # Inicializar variables globales del motor desde template
-    try:
-        _tp = pd.read_excel(rutas["rubros"], sheet_name='Productos')
-        _tp = _tp.dropna(subset=['COD', 'SEGMENTACION'])
-        motor.PROD_MAP = dict(zip(_tp['COD'].astype(int), _tp['SEGMENTACION'].astype(str)))
-    except:
-        motor.PROD_MAP = {}
-
-    try:
-        _td = pd.read_excel(rutas["rubros"], sheet_name='DOM_INT')
-        _td = _td.dropna(subset=['Negocio2', 'DOM/INT'])
-        motor.DI_MAP = dict(zip(_td['Negocio2'].astype(int), _td['DOM/INT'].astype(str)))
-        motor.DI_INT = {str(k).zfill(4) for k, v in motor.DI_MAP.items() if v == 'INT'}
-    except:
-        motor.DI_MAP = {1: 'DOM', 2: 'INT', 101: 'DOM', 102: 'INT', 111: 'DOM', 112: 'INT', 121: 'DOM', 300: 'Iniciativas'}
-        motor.DI_INT = {'0002', '0102', '0112'}
-
-    try:
-        _tr = pd.read_excel(rutas["rubros"], sheet_name='RFC_Cost_Rubros')
-        motor.RFC_COST_RUBROS = set(_tr['PL Totalizador'].dropna().unique())
-    except:
-        motor.RFC_COST_RUBROS = {'Total Cost of Revenue', 'Total Technology and content', 'Total Sales & Marketing', 'Total General and Administrative'}
+    # Inicializar todos los globals del motor desde template
+    motor.cargar_globals_desde_template()
 
     r = {}
     mes_base = leer_periodo_balance(rutas["gl"]) or 10
@@ -419,10 +480,8 @@ def render_pais_card(flag, nombre, metricas, alert=None, sub=None):
 
 
 def mostrar_llaves(r):
-    """Muestra llaves K1-K12 una debajo de otra"""
+    """Muestra llaves K1-K12 y REV1-REV3"""
     llaves = r.get("llaves_ordenes", {})
-    if not llaves:
-        return
 
     nombres = {
         'K1': 'Producto Global', 'K2': 'Por Entidad (Base)', 'K3': 'Sin Brasil',
@@ -433,25 +492,54 @@ def mostrar_llaves(r):
         'K12': 'ONA DOM / INT por POS',
     }
 
-    with st.expander("🔑 Llaves de distribución K1 — K12", expanded=False):
-        keys_list = [k for k in ['K1','K2','K3','K4','K5','K6','K7','K8','K9','K10','K11','K12'] if k in llaves]
+    if llaves:
+        with st.expander("🔑 Llaves de distribución K1 — K12", expanded=False):
+            keys_list = [k for k in ['K1','K2','K3','K4','K5','K6','K7','K8','K9','K10','K11','K12'] if k in llaves]
 
-        for k in keys_list:
-            data = llaves[k]
-            st.markdown(f"**{k}: {nombres.get(k, k)}**")
+            for k in keys_list:
+                data = llaves[k]
+                st.markdown(f"**{k}: {nombres.get(k, k)}**")
 
-            if isinstance(data, pd.Series):
-                df_l = data.reset_index()
-                df_l.columns = ['Entidad', '%']
-                # Valores ya vienen como porcentaje (23.39, no 0.2339)
-                df_l['%'] = df_l['%'].apply(lambda x: f"{x:.2f}%" if isinstance(x, (int, float)) else x)
-                st.dataframe(df_l, use_container_width=True, hide_index=True, height=min(len(df_l)*38+38, 400))
-            elif isinstance(data, pd.DataFrame):
-                df_fmt = data.copy()
-                for c in df_fmt.select_dtypes(include='number').columns:
-                    df_fmt[c] = df_fmt[c].apply(lambda x: f"{x:.2f}%")
-                st.dataframe(df_fmt, use_container_width=True, height=min(len(df_fmt)*38+38, 400))
-            st.markdown("---")
+                if isinstance(data, pd.Series):
+                    df_l = data.reset_index()
+                    df_l.columns = ['Entidad', '%']
+                    df_l['%'] = df_l['%'].apply(lambda x: f"{x:.2f}%" if isinstance(x, (int, float)) else x)
+                    st.dataframe(df_l, use_container_width=True, hide_index=True, height=min(len(df_l)*38+38, 400))
+                elif isinstance(data, pd.DataFrame):
+                    df_fmt = data.copy()
+                    for c in df_fmt.select_dtypes(include='number').columns:
+                        df_fmt[c] = df_fmt[c].apply(lambda x: f"{x:.2f}%")
+                    st.dataframe(df_fmt, use_container_width=True, height=min(len(df_fmt)*38+38, 400))
+                st.markdown("---")
+
+    # ── Llaves Revenue ──────────────────────────────────────────────────────────
+    llaves_rev = r.get("llaves_revenue", {})
+    nombres_rev = {
+        'REV1': 'Apertura ONA por Entidad',
+        'REV2': 'México — Despegar (103) vs Best Day (401)',
+        'REV3': 'Best Day (401) — Apertura por Producto',
+    }
+
+    with st.expander("📈 Llaves de Revenue REV1 — REV3", expanded=False):
+        if not llaves_rev:
+            st.info("Las llaves de revenue no fueron calculadas. Verificá que el Balance GL esté cargado correctamente.")
+        else:
+            for k in ['REV1', 'REV2', 'REV3']:
+                data = llaves_rev.get(k)
+                st.markdown(f"**{k}: {nombres_rev.get(k, k)}**")
+                if data is None:
+                    st.caption("⚠️ Sin datos este período")
+                elif isinstance(data, pd.DataFrame):
+                    df_fmt = data.copy()
+                    for c in df_fmt.select_dtypes(include='number').columns:
+                        df_fmt[c] = df_fmt[c].apply(lambda x: f"{x:.2f}%")
+                    st.dataframe(df_fmt, use_container_width=True, height=min(len(df_fmt)*38+80, 400))
+                elif isinstance(data, pd.Series):
+                    df_l = data.reset_index()
+                    df_l.columns = [df_l.columns[0], '%']
+                    df_l['%'] = df_l['%'].apply(lambda x: f"{x:.2f}%" if isinstance(x, (int, float)) else x)
+                    st.dataframe(df_l, use_container_width=True, hide_index=True, height=min(len(df_l)*38+38, 400))
+                st.markdown("---")
 
 
 def mostrar_resultados(r):
@@ -564,13 +652,22 @@ def mostrar_resultados(r):
             )
         with col_d2:
             buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
                 df_export.to_excel(writer, index=False, sheet_name='Resultados')
                 llaves_exp = r.get("llaves_ordenes", {})
                 for k in ['K1','K2','K3','K4','K5','K6','K7','K8','K9','K10','K11','K12']:
                     if k not in llaves_exp:
                         continue
                     data = llaves_exp[k]
+                    if isinstance(data, pd.Series):
+                        data.reset_index().to_excel(writer, index=False, sheet_name=k)
+                    elif isinstance(data, pd.DataFrame):
+                        data.to_excel(writer, sheet_name=k)
+                llaves_rev_exp = r.get("llaves_revenue", {})
+                for k in ['REV1', 'REV2', 'REV3']:
+                    if k not in llaves_rev_exp or llaves_rev_exp[k] is None:
+                        continue
+                    data = llaves_rev_exp[k]
                     if isinstance(data, pd.Series):
                         data.reset_index().to_excel(writer, index=False, sheet_name=k)
                     elif isinstance(data, pd.DataFrame):
@@ -867,6 +964,10 @@ if st.session_state.resultados is None:
                     llaves_adi = calcular_llaves_adi(df_adi) if df_adi is not None else {}
                     r["llaves_ordenes"] = llaves_ordenes
                     r["llaves_adi"] = llaves_adi
+
+                    progress.progress(55, text="📈 Calculando Llaves Revenue REV1-REV3...")
+                    llaves_revenue = calcular_llaves_revenue(df_balance) if df_balance is not None else {}
+                    r["llaves_revenue"] = llaves_revenue
 
                     tc_clp = tc.get('CLP', 946.38)
                     tc_pen = tc.get('PEN', 3.385)
