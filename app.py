@@ -930,21 +930,7 @@ if st.session_state.resultados is None:
                     motor.RUTA_ADI = st.session_state.archivos_tmp["adi"]
 
                     progress.progress(20, text="🏷️ Cargando Template Maestro...")
-                    try:
-                        _tp = pd.read_excel(st.session_state.archivos_tmp["rubros"], sheet_name='Productos')
-                        _tp = _tp.dropna(subset=['COD', 'SEGMENTACION'])
-                        motor.PROD_MAP = dict(zip(_tp['COD'].astype(int), _tp['SEGMENTACION'].astype(str)))
-                    except: motor.PROD_MAP = {}
-                    try:
-                        _td = pd.read_excel(st.session_state.archivos_tmp["rubros"], sheet_name='DOM_INT')
-                        _td = _td.dropna(subset=['Negocio2', 'DOM/INT'])
-                        motor.DI_MAP = dict(zip(_td['Negocio2'].astype(int), _td['DOM/INT'].astype(str)))
-                        motor.DI_INT = {str(k).zfill(4) for k, v in motor.DI_MAP.items() if v == 'INT'}
-                    except: pass
-                    try:
-                        _tr = pd.read_excel(st.session_state.archivos_tmp["rubros"], sheet_name='RFC_Cost_Rubros')
-                        motor.RFC_COST_RUBROS = set(_tr['PL Totalizador'].dropna().unique())
-                    except: pass
+                    motor.cargar_globals_desde_template()
 
                     progress.progress(30, text="📊 Procesando Balance...")
                     r = {}
