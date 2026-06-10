@@ -437,6 +437,190 @@ def ejecutar_calculo(rutas):
     return r
 
 
+def generar_detalle_transacciones(r, writer):
+    """
+    Genera la hoja 'Detalle Transacciones' con el formato del Excel de referencia.
+    Cada transacción es UNA fila con su TOTAL (sin desglose por producto).
+    Columnas: Entidad Prestadora | Entidad Receptora | Transacción | Tipo | Importe USD
+    """
+    from datetime import datetime
+
+    tc      = r.get('tc', {})
+    mes     = r.get('mes_base', 1)
+    year    = datetime.now().year
+
+    MESES = {1:'Enero',2:'Febrero',3:'Marzo',4:'Abril',5:'Mayo',6:'Junio',
+             7:'Julio',8:'Agosto',9:'Septiembre',10:'Octubre',11:'Noviembre',12:'Diciembre'}
+    mes_str = MESES.get(mes, str(mes))
+
+    wb  = writer.book
+    ws  = wb.add_worksheet('Detalle Transacciones')
+
+    # Formatos
+    fmt_title  = wb.add_format({'bold': True, 'font_size': 13})
+    fmt_sub    = wb.add_format({'bold': True, 'font_size': 11, 'italic': True})
+    fmt_header = wb.add_format({'bold': True, 'bg_color': '#4472C4', 'font_color': 'white',
+                                 'border': 1, 'align': 'center', 'valign': 'vcenter', 'text_wrap': True})
+    fmt_ent    = wb.add_format({'bold': True, 'bg_color': '#D9E1F2', 'border': 1, 'valign': 'vcenter'})
+    fmt_txt    = wb.add_format({'border': 1, 'valign': 'vcenter'})
+    fmt_num    = wb.add_format({'border': 1, 'num_format': '#,##0.00', 'valign': 'vcenter'})
+    fmt_neg    = wb.add_format({'border': 1, 'num_format': '#,##0.00', 'font_color': '#C00000', 'valign': 'vcenter'})
+    fmt_total  = wb.add_format({'bold': True, 'bg_color': '#E2EFDA', 'border': 1, 'num_format': '#,##0.00'})
+    fmt_total_t= wb.add_format({'bold': True, 'bg_color': '#E2EFDA', 'border': 1})
+
+    ws.set_column('A:A', 28)
+    ws.set_column('B:B', 28)
+    ws.set_column('C:C', 36)
+    ws.set_column('D:D', 10)
+    ws.set_column('E:E', 16)
+    ws.set_column('F:F', 16)
+
+    def _n(v): return v if v is not None else 0.0
+    def _wnum(row, col, val):
+        if val is None:
+            ws.write(row, col, '', fmt_txt)
+        elif val < 0:
+            ws.write_number(row, col, val, fmt_neg)
+        else:
+            ws.write_number(row, col, val, fmt_num)
+
+    AR     = 'Despegar.com.ar'
+    TR_ENT = 'Travel Reservations (UY)'
+
+    # ── Apertura de productos REPLICANDO el template de referencia ──
+    # RFC: HT y ONA
+    # Marca/IT: apertura ONA completa (Vuelos, HT, Paquetes, Autos, Seguros, Cruceros, Servicios en destino)
+    # Nuestro desglose llega a Vuelos / HT / ONA → ONA se mapea a 'Paquetes'.
+    # Las sub-categorías que no calculamos (Autos, Seguros, Cruceros, Servicios) quedan en blanco.
+    ORD_RFC = [('HT', 'HT'), ('ONA', 'ONA')]
+    # (etiqueta_template, clave_en_nuestro_detalle)  — None = fila en blanco
+    ORD_MARCA = [('Vuelos', 'Vuelos'), ('HT', 'HT'), ('Paquetes', 'ONA'),
+                 ('Autos', None), ('Seguros', None), ('Cruceros', None),
+                 ('Servicios en destino', None)]
+    ORD_IT    = [('Vuelos', 'Vuelos'), ('HT', 'HT'), ('Paquetes', 'ONA'),
+                 ('Autos', None), ('Seguro', None), ('Cruceros', None),
+                 ('Servicios en destino', None)]
+
+    paises_cfg = [
+        ('ecuador', 'Despegar Ecuador'),
+        ('chile',   'Despegar Chile'),
+        ('peru',    'Despegar Perú'),
+        ('usa',     'Despegar USA'),
+        ('tr',      'Travel Reservations (UY)'),
+        ('espana',  'Despegar España'),
+    ]
+
+    current_row = 0
+
+    def write_block(row, prestadora, receptora, label_base, tipo, detalle_dict, apertura, total):
+        """
+        Escribe un bloque con merge de entidades, replicando la apertura del template.
+        `apertura` = lista de (etiqueta_template, clave_detalle | None).
+        Se escriben TODAS las filas (incluso las en blanco).
+        El total va en col E (Importe USD) de la primera fila CON valor; cada producto en col F.
+        Devuelve (nueva_fila, suma_componentes) para el Control.
+        """
+        n = len(apertura)
+        if n > 1:
+            ws.merge_range(row, 0, row+n-1, 0, prestadora, fmt_ent)
+            ws.merge_range(row, 1, row+n-1, 1, receptora,  fmt_ent)
+        else:
+            ws.write(row, 0, prestadora, fmt_ent)
+            ws.write(row, 1, receptora,  fmt_ent)
+        # Índice de la primera fila con valor → ahí va el total (col E) y el 'Tipo'
+        idx_total = next((i for i, (_, c) in enumerate(apertura)
+                          if c and detalle_dict.get(c) is not None
+                          and abs(detalle_dict.get(c, 0)) > 0.005), 0)
+        suma = 0.0
+        for i, (lbl_prod, clave) in enumerate(apertura):
+            ws.write(row+i, 2, f'{label_base}  {lbl_prod}', fmt_txt)
+            ws.write(row+i, 3, tipo if i == idx_total else '', fmt_txt)
+            if i == idx_total:
+                _wnum(row+i, 4, total)
+            else:
+                ws.write(row+i, 4, '', fmt_txt)
+            val = detalle_dict.get(clave) if clave else None
+            if val is not None and abs(val) > 0.005:
+                _wnum(row+i, 5, val)
+                suma += val
+            else:
+                ws.write(row+i, 5, '', fmt_txt)
+        return row + n, suma
+
+    for key, nombre_pais in paises_cfg:
+        d = r.get(key)
+        if not d:
+            continue
+
+        det = d.get('_detalle_prod', {})
+        controles = []  # (label, total - suma_desglose) → debe dar 0
+
+        # ── Título ──
+        ws.merge_range(current_row, 0, current_row, 5, f'{nombre_pais} - FY {year}', fmt_title)
+        current_row += 1
+        ws.merge_range(current_row, 0, current_row, 5,
+                       f'Detalle de Transacciones Intercompany {mes_str} {year}', fmt_sub)
+        current_row += 2
+
+        # ── Headers ──
+        for col, hdr in enumerate(['Entidad prestadora del Servicio',
+                                    'Entidad Receptora del Servicio',
+                                    'Transacción', 'Tipo', 'Importe USD', 'Importe - USD']):
+            ws.write(current_row, col, hdr, fmt_header)
+        ws.set_row(current_row, 30)
+        current_row += 1
+
+        total_seccion = 0.0
+
+        # ── RFC ──
+        rfc = _n(d.get('RFC'))
+        if abs(rfc) > 0.01 and 'RFC' in det:
+            receptor_rfc = TR_ENT if key == 'usa' else AR
+            current_row, suma = write_block(current_row, nombre_pais, receptor_rfc,
+                                       'Referencia de Clientes', 'Ingreso',
+                                       det['RFC'], ORD_RFC, rfc)
+            total_seccion += rfc
+            controles.append(('Control Ref.Clientes', rfc - suma))
+
+        # ── Marca ──
+        mk = _n(d.get('Licencia_Marca'))
+        if abs(mk) > 0.01 and 'Marca' in det:
+            current_row, suma = write_block(current_row, TR_ENT, nombre_pais,
+                                       'Licencia de Marca', 'Egreso',
+                                       det['Marca'], ORD_MARCA, mk)
+            total_seccion += mk
+            controles.append(('Control Marca', mk - suma))
+
+        # ── IT ──
+        it = _n(d.get('Licencia_IT'))
+        if abs(it) > 0.01 and 'IT' in det:
+            current_row, suma = write_block(current_row, AR, nombre_pais,
+                                       'Licencia de IT', 'Egreso',
+                                       det['IT'], ORD_IT, it)
+            total_seccion += it
+            controles.append(('Control Lic. IT', it - suma))
+
+        # NOTA: Hosting (USA) NO va en esta solapa — se factura aparte (solapa "Ss Hosting").
+
+        # ── Fila Total ──
+        ws.write(current_row, 0, 'Total', fmt_total_t)
+        for c in range(1, 4): ws.write(current_row, c, '', fmt_total_t)
+        ws.write_number(current_row, 4, total_seccion, fmt_total)
+        ws.write_number(current_row, 5, total_seccion, fmt_total)
+        current_row += 2
+
+        # ── Filas de Control (validan que el desglose suma al total) ──
+        # Label en col E (Importe USD), valor en col F (Importe - USD) — igual que la referencia.
+        fmt_ctrl_lbl = wb.add_format({'italic': True, 'font_color': '#666666'})
+        fmt_ctrl_val = wb.add_format({'num_format': '#,##0.00', 'italic': True, 'font_color': '#666666'})
+        for lbl, ctrl in controles:
+            ws.write(current_row, 4, lbl, fmt_ctrl_lbl)
+            ws.write_number(current_row, 5, round(ctrl, 2), fmt_ctrl_val)
+            current_row += 1
+
+        current_row += 2  # espacio entre países
+
+
 def fmt_usd(v):
     """Formatea USD con color"""
     if v < 0:
@@ -672,6 +856,11 @@ def mostrar_resultados(r):
                         data.reset_index().to_excel(writer, index=False, sheet_name=k)
                     elif isinstance(data, pd.DataFrame):
                         data.to_excel(writer, sheet_name=k)
+                # ── Detalle Transacciones ──
+                try:
+                    generar_detalle_transacciones(r, writer)
+                except Exception:
+                    pass
             st.download_button(
                 "📊 Descargar Excel",
                 data=buffer.getvalue(),
