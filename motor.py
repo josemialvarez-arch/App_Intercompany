@@ -879,6 +879,12 @@ def calcular_ecuador_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
         'Licencia_Marca': Lic_Marca,
         'Licencia_IT':    Lic_IT,
         'RFC':            RFC,
+        # Detalle por producto (USD) — suma exacta al total
+        '_detalle_prod': {
+            'RFC':   {'HT': (G31 - G33 * MARKUP_RFC), 'ONA': (H31 - H33 * MARKUP_RFC)},
+            'Marca': {'Vuelos': D67, 'HT': E67, 'ONA': F67},
+            'IT':    {'Vuelos': D72, 'HT': E72, 'ONA': F72},
+        },
         # Intermedios de diagnóstico
         '_G31': G31, '_H31': H31, '_D31': D31, '_E31': E31, '_F31': F31,
         '_G33': G33, '_H33': H33,
@@ -1087,6 +1093,12 @@ def calcular_chile_hoja_llave(df_balance_raw, llaves_ordenes, tc_clp, mes_base=1
         'Licencia_Marca': Lic_Marca,
         'Licencia_IT':    Lic_IT,
         'RFC':            RFC,
+        # Detalle por producto (USD) — suma exacta al total
+        '_detalle_prod': {
+            'RFC':   {'HT': (G31 - G33 * MARKUP_RFC_CHILE) / tc_clp, 'ONA': (H31 - H33 * MARKUP_RFC_CHILE) / tc_clp},
+            'Marca': {'Vuelos': D67 / tc_clp, 'HT': E67 / tc_clp, 'ONA': F67 / tc_clp},
+            'IT':    {'Vuelos': D72 / tc_clp, 'HT': E72 / tc_clp, 'ONA': F72 / tc_clp},
+        },
         # Intermedios de diagnóstico
         '_G31': G31, '_H31': H31, '_D31': D31, '_E31': E31, '_F31': F31,
         '_G33': G33, '_H33': H33,
@@ -1276,6 +1288,12 @@ def calcular_peru_hoja_llave(df_balance_raw, llaves_ordenes, tc_pen, mes_base=10
         'Licencia_Marca': Lic_Marca,
         'Licencia_IT':    Lic_IT,
         'RFC':            RFC,
+        # Detalle por producto (USD) — suma exacta al total
+        '_detalle_prod': {
+            'RFC':   {'HT': (G31 - G33 * MARKUP_RFC_PE) / tc_pen, 'ONA': (H31 - H33 * MARKUP_RFC_PE) / tc_pen},
+            'Marca': {'Vuelos': D67 / tc_pen, 'HT': E67 / tc_pen, 'ONA': F67 / tc_pen},
+            'IT':    {'Vuelos': D72 / tc_pen, 'HT': E72 / tc_pen, 'ONA': F72 / tc_pen},
+        },
         # Intermedios de diagnóstico
         '_G31': G31, '_H31': H31, '_D31': D31, '_E31': E31, '_F31': F31,
         '_G33': G33, '_H33': H33,
@@ -1567,6 +1585,12 @@ def calcular_usa_hoja_llave(df_balance_raw, llaves_ordenes, mes_base=10):
         'Licencia_IT':    Lic_IT,
         'RFC':            RFC,
         'Hosting':        Hosting,
+        # Detalle por producto (USD) — suma exacta al total
+        '_detalle_prod': {
+            'RFC':   {'HT': (G31 - G33 * MARKUP_RFC_USA), 'ONA': (H31 - H33 * MARKUP_RFC_USA)},
+            'Marca': {'Vuelos': D67, 'HT': E67, 'ONA': F67},
+            'IT':    {'Vuelos': D72, 'HT': E72, 'ONA': F72},
+        },
         # Intermedios de diagnóstico
         '_G31': G31, '_H31': H31, '_D31': D31, '_E31': E31, '_F31': F31,
         '_G33': G33, '_H33': H33,
@@ -1678,6 +1702,10 @@ def calcular_tr_hoja_llave(df_balance_raw, mes_base=2):
 
     return {
         'Licencia_IT': Lic_IT,
+        # Detalle por producto (USD) — suma exacta al total
+        '_detalle_prod': {
+            'IT': {'Vuelos': fact_vuelos, 'HT': fact_ht, 'ONA': fact_ona},
+        },
         # Intermedios de diagnóstico
         '_nr_vuelos': nr_vuelos, '_nr_ht': nr_ht, '_nr_ona': nr_ona,
         '_fr_vuelos': fr_vuelos, '_fr_ht': fr_ht, '_fr_ona': fr_ona,
@@ -1789,6 +1817,11 @@ def calcular_espana_hoja_llave(df_balance_raw, tc_eur, mes_base=2):
         'Licencia_Marca':     Lic_Marca,
         'Licencia_IT_EUR':    Lic_IT_EUR,
         'Licencia_Marca_EUR': Lic_Marca_EUR,
+        # Detalle por producto (USD) — suma exacta al total
+        '_detalle_prod': {
+            'IT':    {'HT': fact_it_ht / tc_eur, 'ONA': fact_it_ona / tc_eur},
+            'Marca': {'HT': fact_mk_ht / tc_eur, 'ONA': fact_mk_ona / tc_eur},
+        },
         # Intermedios de diagnóstico
         '_nr_ht': nr_ht, '_nr_ona': nr_ona,
         '_fr_ht': fr_ht, '_fr_ona': fr_ona,
